@@ -1,0 +1,6 @@
+INFO:     2a09:bac5:55f8:18be::277:6b:0 - "GET /health HTTP/1.1" 503 Service Unavailable
+INFO:     2a09:bac5:55fe:18be::277:6b:0 - "GET /docs HTTP/1.1" 200 OK
+INFO:     2a09:bac5:55fe:18be::277:6b:0 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     2a09:bac5:55f8:18be::277:6b:0 - "GET /sources HTTP/1.1" 200 OK
+INFO:     2a09:bac5:55fe:18be::277:6b:0 - "GET /health HTTP/1.1" 503 Service Unavailable
+INFO:     2a09:bac5:55fe:18be::277:6b:0 - "GET /health HTTP/1.1" 503 Service Unavailable

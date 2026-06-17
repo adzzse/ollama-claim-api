@@ -1,0 +1,15 @@
+chunk logic
+
+log mineru server == ok
+
+regex trim ref
+
+**reasoning log == k expose reasoning đc, hiện summary tạm
+
+process chỉ cần id
+
+customize mineru gen ra file cần only -- k đc
+
+mineru upload paper == ok
+
+ngrok == ok
