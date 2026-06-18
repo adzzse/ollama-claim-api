@@ -5,7 +5,14 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from app.models import ClaimAnalysisRequest, ClaimAnalysisResponse, PaperReviewResponse
+from app.models import (
+    ClaimAnalysisRequest,
+    ClaimAnalysisResponse,
+    PaperReviewResponse,
+    GenerateRequest,
+    GenerateResponse,
+    ModelsResponse,
+)
 from app.settings import Settings
 from app.store import PaperRecord
 
@@ -61,6 +68,60 @@ async def check_ollama(settings: Settings) -> dict[str, Any]:
         "ok": True,
         "model_available": settings.ollama_model in model_names,
     }
+
+
+async def list_models(settings: Settings) -> ModelsResponse:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{settings.ollama_base_url}/api/tags")
+            response.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        raise OllamaUnavailableError("Ollama is not reachable") from exc
+
+    try:
+        data = response.json()
+        return ModelsResponse.model_validate(
+            {"models": [{"name": model["name"]} for model in data.get("models", []) if model.get("name")]}
+        )
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise OllamaInvalidResponseError("Ollama returned invalid model list JSON") from exc
+
+
+async def generate_response(
+    payload: GenerateRequest,
+    settings: Settings,
+) -> GenerateResponse:
+    model = payload.model or settings.ollama_model
+    request_body = {
+        "model": model,
+        "prompt": payload.prompt,
+        "stream": False,
+    }
+    logger.info("request start model=%s prompt_chars=%s", model, len(payload.prompt))
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json=request_body,
+            )
+            response.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        logger.info("request failed model=%s reason=%s", model, exc)
+        raise OllamaUnavailableError("Ollama generation failed") from exc
+
+    try:
+        response_data = response.json()
+        return GenerateResponse.model_validate(
+            {
+                "model": response_data.get("model", model),
+                "response": response_data["response"],
+                "done": response_data.get("done", False),
+            }
+        )
+    except (KeyError, TypeError, ValueError, ValidationError) as exc:
+        logger.info("request invalid reason=%s", exc)
+        raise OllamaInvalidResponseError("Ollama returned invalid generation JSON") from exc
 
 
 async def analyze_claim(payload: ClaimAnalysisRequest, settings: Settings) -> ClaimAnalysisResponse:

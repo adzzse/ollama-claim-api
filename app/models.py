@@ -5,6 +5,45 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Verdict = Literal["supported", "partially_supported", "unsupported", "unclear"]
 PaperStyle = Literal["conference", "article", "magazine", "report", "thesis", "unknown"]
+NonStreamingFlag = Literal[False]
+
+
+class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1, max_length=12000)
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    stream: NonStreamingFlag = False
+
+    @field_validator("prompt")
+    @classmethod
+    def strip_prompt(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("prompt must not be empty")
+        return stripped
+
+    @field_validator("model")
+    @classmethod
+    def strip_optional_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class GenerateResponse(BaseModel):
+    model: str
+    response: str
+    done: bool
+
+
+class ModelSummary(BaseModel):
+    name: str
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelSummary]
 
 
 class ClaimAnalysisRequest(BaseModel):

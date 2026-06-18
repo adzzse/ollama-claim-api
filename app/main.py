@@ -19,6 +19,9 @@ from app.models import (
     SourceReferencesResponse,
     SourceSummary,
     SourceUploadResponse,
+    GenerateRequest,
+    GenerateResponse,
+    ModelsResponse,
 )
 from app.ollama_client import (
     OllamaInvalidResponseError,
@@ -26,6 +29,8 @@ from app.ollama_client import (
     analyze_paper_review,
     analyze_claim,
     check_ollama,
+    generate_response,
+    list_models,
 )
 from app.paper_review import review_paper
 from app.settings import Settings, load_settings
@@ -64,6 +69,21 @@ async def health(
         "model": settings.ollama_model,
         "ollama": ollama_status,
     }
+
+
+@app.get("/ai/models", response_model=ModelsResponse)
+async def ai_models(
+    settings: Settings = Depends(get_settings),
+) -> ModelsResponse:
+    return await list_models(settings)
+
+
+@app.post("/ai/generate", response_model=GenerateResponse)
+async def ai_generate(
+    payload: GenerateRequest,
+    settings: Settings = Depends(get_settings),
+) -> GenerateResponse:
+    return await generate_response(payload, settings)
 
 
 @app.post("/process/claim", response_model=ClaimAnalysisResponse)

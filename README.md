@@ -94,6 +94,85 @@ python scripts\demo_all_endpoints.py `
   --base-url https://your-forwarding-url.ngrok-free.dev
 ```
 
+## Team AI Proxy
+
+The team proxy exposes a small API through FastAPI so teammates can use the local Ollama model without connecting directly to Ollama port `11434`.
+
+Keep Ollama running locally:
+
+```powershell
+ollama list
+```
+
+Start the FastAPI ngrok tunnel:
+
+```powershell
+python scripts\start_ngrok_tunnel.py
+```
+
+Use the `Forwarding` HTTPS URL from ngrok as the public base URL.
+
+List models:
+
+```powershell
+curl.exe --ssl-no-revoke "https://your-ngrok-url.ngrok-free.dev/ai/models" `
+  -H "ngrok-skip-browser-warning: true"
+```
+
+Generate text:
+
+```powershell
+$body = @{
+  prompt = "Explain retrieval augmented generation in 3 sentences."
+} | ConvertTo-Json -Compress
+
+curl.exe --ssl-no-revoke -X POST "https://your-ngrok-url.ngrok-free.dev/ai/generate" `
+  -H "Content-Type: application/json" `
+  -H "ngrok-skip-browser-warning: true" `
+  --data-raw "$body"
+```
+
+The request defaults to:
+
+```json
+{
+  "model": "evidencopilot:latest",
+  "stream": false
+}
+```
+
+Java 11+ example:
+
+```java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+public class EvidencePilotAiClient {
+    private static final String BASE_URL = "https://your-ngrok-url.ngrok-free.dev";
+
+    public static void main(String[] args) throws Exception {
+        String json = "{\"prompt\":\"Explain retrieval augmented generation in 3 sentences.\"}";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/ai/generate"))
+                .header("Content-Type", "application/json")
+                .header("ngrok-skip-browser-warning", "true")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        System.out.println(response.statusCode());
+        System.out.println(response.body());
+    }
+}
+```
+
 Build the project-specific Ollama model once:
 
 ```powershell
