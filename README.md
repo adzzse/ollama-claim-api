@@ -132,7 +132,7 @@ curl.exe --ssl-no-revoke -X POST "https://your-ngrok-url.ngrok-free.dev/ai/gener
   --data-raw "$body"
 ```
 
-The request defaults to:
+The public request body only accepts `prompt`. FastAPI internally uses:
 
 ```json
 {

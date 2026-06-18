@@ -91,7 +91,7 @@ async def generate_response(
     payload: GenerateRequest,
     settings: Settings,
 ) -> GenerateResponse:
-    model = payload.model or settings.ollama_model
+    model = settings.ollama_model
     request_body = {
         "model": model,
         "prompt": payload.prompt,
