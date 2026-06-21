@@ -235,3 +235,45 @@ def _issue_for_prompt(issue) -> dict:
     if hasattr(issue, "model_dump"):
         return issue.model_dump()
     return dict(issue)
+
+
+async def generate_embeddings(text: str, settings: Settings) -> list[float]:
+    request_body = {
+        "model": settings.ollama_embedding_model,
+        "prompt": text,
+    }
+    logger.info(
+        "embeddings request start model=%s text_chars=%s",
+        settings.ollama_embedding_model,
+        len(text),
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.ollama_base_url}/api/embeddings",
+                json=request_body,
+            )
+            response.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        logger.info(
+            "embeddings request failed model=%s reason=%s",
+            settings.ollama_embedding_model,
+            exc,
+        )
+        raise OllamaUnavailableError("Ollama embeddings generation failed") from exc
+
+    try:
+        response_data = response.json()
+        embedding = response_data.get("embedding")
+        if embedding is None:
+            embeddings = response_data.get("embeddings")
+            if embeddings and isinstance(embeddings, list):
+                embedding = embeddings[0]
+        if not isinstance(embedding, list):
+            raise ValueError("No embedding vector found in response")
+        logger.info("embeddings request complete dimensions=%s", len(embedding))
+        return embedding
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.info("embeddings response invalid reason=%s", exc)
+        raise OllamaInvalidResponseError("Ollama returned invalid embeddings response") from exc

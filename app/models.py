@@ -147,3 +147,19 @@ class PaperReviewResponse(BaseModel):
     missing_sections: list[SectionIssue]
     weak_sections: list[SectionIssue]
     claim_recommendations: list[SectionIssue]
+
+
+class EmbeddingRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("text must not be empty")
+        return stripped
+
+
+class EmbeddingResponse(BaseModel):
+    embedding: list[float]

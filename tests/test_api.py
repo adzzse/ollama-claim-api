@@ -354,3 +354,145 @@ def test_analyze_paper_review_logs_timeout_exception_type(monkeypatch, caplog):
 
     assert "paper ai request failed model=evidencopilot:latest exception_type=ReadTimeout" in caplog.text
     assert "timeout_seconds=321.0" in caplog.text
+
+
+def test_get_embeddings_success(client: TestClient):
+    from app.models import EmbeddingResponse
+
+    async def fake_run_generate_embeddings():
+        return EmbeddingResponse(embedding=[0.1, -0.2, 0.35])
+
+    from app.main import run_generate_embeddings
+    app.dependency_overrides[run_generate_embeddings] = fake_run_generate_embeddings
+
+    response = client.post("/ai/embeddings", json={"text": "hello world"})
+
+    assert response.status_code == 200
+    assert response.json() == {"embedding": [0.1, -0.2, 0.35]}
+
+
+def test_get_embeddings_validation_error_empty_text(client: TestClient):
+    response = client.post("/ai/embeddings", json={"text": "   "})
+    assert response.status_code == 422
+
+
+def test_get_embeddings_validation_error_missing_field(client: TestClient):
+    response = client.post("/ai/embeddings", json={})
+    assert response.status_code == 422
+
+
+def test_generate_embeddings_client_success(monkeypatch):
+    import asyncio
+    from app.ollama_client import generate_embeddings
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embedding": [0.01, -0.02, 0.03]}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            assert url.endswith("/api/embeddings")
+            assert json["prompt"] == "test text"
+            assert json["model"] == "nomic-embed-text"
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    res = asyncio.run(generate_embeddings("test text", Settings()))
+    assert res == [0.01, -0.02, 0.03]
+
+
+def test_generate_embeddings_client_fallback_embeddings(monkeypatch):
+    import asyncio
+    from app.ollama_client import generate_embeddings
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[0.99, -0.88]]}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    res = asyncio.run(generate_embeddings("test text", Settings()))
+    assert res == [0.99, -0.88]
+
+
+def test_generate_embeddings_client_unavailable(monkeypatch):
+    import asyncio
+    import httpx
+    from app.ollama_client import generate_embeddings
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            raise httpx.ConnectError("Connection refused")
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(OllamaUnavailableError):
+        asyncio.run(generate_embeddings("test text", Settings()))
+
+
+def test_generate_embeddings_client_invalid_response(monkeypatch):
+    import asyncio
+    from app.ollama_client import generate_embeddings
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"invalid_key": "not a list"}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(OllamaInvalidResponseError):
+        asyncio.run(generate_embeddings("test text", Settings()))

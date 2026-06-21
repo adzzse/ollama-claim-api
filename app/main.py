@@ -10,6 +10,8 @@ from app.models import (
     ClaimAnalysisResponse,
     ClaimMatchRequest,
     ClaimMatchResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
     PaperReviewRequest,
     PaperReviewResponse,
     PaperSummary,
@@ -26,6 +28,7 @@ from app.ollama_client import (
     analyze_paper_review,
     analyze_claim,
     check_ollama,
+    generate_embeddings,
 )
 from app.paper_review import review_paper
 from app.settings import Settings, load_settings
@@ -214,6 +217,31 @@ async def review_uploaded_paper(
         len(review["claim_recommendations"]),
     )
     return PaperReviewResponse.model_validate(review)
+
+
+async def run_generate_embeddings(
+    payload: EmbeddingRequest,
+    settings: Settings = Depends(get_settings),
+) -> EmbeddingResponse:
+    logger.debug(
+        "embeddings start text_chars=%s model=%s",
+        len(payload.text),
+        settings.ollama_embedding_model,
+    )
+    vector = await generate_embeddings(payload.text, settings)
+    logger.debug(
+        "embeddings complete text_chars=%s vector_dim=%s",
+        len(payload.text),
+        len(vector),
+    )
+    return EmbeddingResponse(embedding=vector)
+
+
+@app.post("/ai/embeddings", response_model=EmbeddingResponse)
+async def get_embeddings(
+    result: EmbeddingResponse = Depends(run_generate_embeddings),
+) -> EmbeddingResponse:
+    return result
 
 
 @app.exception_handler(OllamaUnavailableError)
