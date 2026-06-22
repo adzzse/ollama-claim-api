@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 Verdict = Literal["supported", "partially_supported", "unsupported", "unclear"]
-PaperStyle = Literal["conference", "article", "magazine", "report", "thesis", "unknown"]
 
 
 class GenerateRequest(BaseModel):
@@ -81,97 +80,49 @@ class ClaimAnalysisResponse(BaseModel):
         return stripped
 
 
-class SourceSummary(BaseModel):
-    id: str
+class ExtractResponse(BaseModel):
     filename: str
-    chunk_count: int
-    reference_count: int
+    method: Literal["mineru", "text"]
+    markdown: str = Field(min_length=1)
 
 
-class SourceUploadResponse(BaseModel):
-    sources: list[SourceSummary]
+class GenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
 
-
-class SourceListResponse(BaseModel):
-    sources: list[SourceSummary]
-
-
-class SourceReferenceSummary(BaseModel):
-    id: str
-    source_id: str
-    filename: str
-    raw_text: str
-    title: str | None = None
-    year: int | None = None
-
-
-class SourceReferencesResponse(BaseModel):
-    references: list[SourceReferenceSummary]
-
-
-class ClaimMatchRequest(BaseModel):
-    claim: str = Field(min_length=1, max_length=4000)
-    top_k: int = Field(default=5, ge=1, le=10)
-
-    @field_validator("claim")
+    @field_validator("prompt")
     @classmethod
-    def strip_match_claim(cls, value: str) -> str:
+    def strip_prompt(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("claim must not be empty")
+            raise ValueError("prompt must not be empty")
         return stripped
 
 
-class ClaimMatch(BaseModel):
-    source_id: str
-    filename: str
-    chunk_id: str
-    page: int | None = None
-    excerpt: str
-    score: float = Field(ge=0.0, le=1.0)
-    suitability: Literal["strong", "medium", "weak"]
-    explanation: str
+class GenerateResponse(BaseModel):
+    model: str = Field(min_length=1)
+    response: str = Field(min_length=1)
+    done: bool
 
-
-class ClaimMatchResponse(BaseModel):
-    claim: str
-    matches: list[ClaimMatch]
-
-
-class PaperSummary(BaseModel):
-    id: str
-    filename: str
-    section_count: int
-
-
-class PaperUploadResponse(BaseModel):
-    paper: PaperSummary
-
-
-class PaperReviewRequest(BaseModel):
-    paper_id: str = Field(min_length=1)
-    target_style: PaperStyle | None = None
-    use_ai: bool = False
-
-    @field_validator("paper_id")
+    @field_validator("model", "response")
     @classmethod
-    def strip_paper_id(cls, value: str) -> str:
+    def strip_generate_text(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
-            raise ValueError("paper_id must not be empty")
+            raise ValueError("field must not be empty")
         return stripped
 
 
-class SectionIssue(BaseModel):
-    section: str
-    issue: str
-    recommendation: str
+class EmbeddingRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("text must not be empty")
+        return stripped
 
 
-class PaperReviewResponse(BaseModel):
-    paper_id: str
-    detected_style: PaperStyle
-    target_style: PaperStyle
-    missing_sections: list[SectionIssue]
-    weak_sections: list[SectionIssue]
-    claim_recommendations: list[SectionIssue]
+class EmbeddingResponse(BaseModel):
+    embedding: list[float]
