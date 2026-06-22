@@ -1,4 +1,4 @@
-from io import BytesIO
+from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from zipfile import BadZipFile
 
 from fastapi import UploadFile
 
@@ -28,12 +27,19 @@ class MinerUExtractionError(RuntimeError):
     pass
 
 
-async def extract_upload_text(file: UploadFile) -> str:
+@dataclass(frozen=True)
+class ExtractedMarkdown:
+    filename: str
+    method: str
+    markdown: str
+
+
+async def extract_upload_markdown(file: UploadFile) -> ExtractedMarkdown:
     raw = await file.read()
     filename = file.filename or "uploaded-file"
     suffix = Path(filename).suffix.lower()
     logger.debug(
-        "extract upload text filename=%s suffix=%s content_type=%s bytes=%s",
+        "extract markdown start filename=%s suffix=%s content_type=%s bytes=%s",
         filename,
         suffix or "<none>",
         file.content_type,
@@ -41,27 +47,19 @@ async def extract_upload_text(file: UploadFile) -> str:
     )
 
     if suffix in {"", ".txt", ".md"} or (file.content_type or "").startswith("text/"):
-        text = _decode_text(raw)
-        logger.debug("extract text complete filename=%s method=text chars=%s", filename, len(text))
-        return text
-    if suffix == ".docx":
-        return _extract_with_mineru_or_fallback(filename, raw, _extract_docx)
-    if suffix == ".pdf":
-        return _extract_with_mineru_or_fallback(filename, raw, _extract_pdf)
+        markdown = _decode_text(raw)
+        logger.debug("extract markdown complete filename=%s method=text chars=%s", filename, len(markdown))
+        return ExtractedMarkdown(filename=filename, method="text", markdown=markdown)
+
+    if suffix in {".pdf", ".docx", ".pptx", ".xlsx"}:
+        try:
+            markdown = extract_with_mineru(filename, raw)
+        except (MinerUUnavailableError, MinerUExtractionError) as exc:
+            raise ExtractionError(str(exc)) from exc
+        logger.debug("extract markdown complete filename=%s method=mineru chars=%s", filename, len(markdown))
+        return ExtractedMarkdown(filename=filename, method="mineru", markdown=markdown)
 
     raise ExtractionError(f"Unsupported file type for {filename}")
-
-
-def _extract_with_mineru_or_fallback(filename: str, raw: bytes, fallback) -> str:
-    try:
-        text = extract_with_mineru(filename, raw)
-        logger.debug("extract text complete filename=%s method=mineru chars=%s", filename, len(text))
-        return text
-    except (MinerUUnavailableError, MinerUExtractionError) as exc:
-        logger.debug("mineru unavailable or failed filename=%s reason=%s", filename, exc)
-        text = fallback(raw)
-        logger.debug("extract text complete filename=%s method=fallback chars=%s", filename, len(text))
-        return text
 
 
 def extract_with_mineru(filename: str, raw: bytes) -> str:
@@ -177,30 +175,6 @@ def _decode_text(raw: bytes) -> str:
     except UnicodeDecodeError:
         text = raw.decode("utf-8", errors="replace")
     return _clean_text(text)
-
-
-def _extract_docx(raw: bytes) -> str:
-    try:
-        from docx import Document
-
-        document = Document(BytesIO(raw))
-    except (BadZipFile, Exception) as exc:
-        raise ExtractionError("Could not extract text from DOCX") from exc
-
-    paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-    return _clean_text("\n\n".join(paragraphs))
-
-
-def _extract_pdf(raw: bytes) -> str:
-    try:
-        import fitz
-
-        document = fitz.open(stream=raw, filetype="pdf")
-        pages = [page.get_text("text") for page in document]
-    except Exception as exc:
-        raise ExtractionError("Could not extract text from PDF") from exc
-
-    return _clean_text("\n\n".join(pages))
 
 
 def _clean_text(text: str) -> str:
