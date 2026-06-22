@@ -65,6 +65,21 @@ async def health(
     }
 
 
+@app.get("/ai/models", response_model=ModelsResponse)
+async def ai_models(
+    settings: Settings = Depends(get_settings),
+) -> ModelsResponse:
+    return await list_models(settings)
+
+
+@app.post("/ai/generate", response_model=GenerateResponse)
+async def ai_generate(
+    payload: GenerateRequest,
+    settings: Settings = Depends(get_settings),
+) -> GenerateResponse:
+    return await generate_response(payload, settings)
+
+
 @app.post("/process/claim", response_model=ClaimAnalysisResponse)
 async def process_claim(
     result: ClaimAnalysisResponse = Depends(run_claim_analysis),
