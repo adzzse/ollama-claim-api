@@ -58,7 +58,27 @@ MINERU_TIMEOUT_SECONDS=600
 
 `GET /health`
 
-Returns service and Ollama health.
+Returns service, Ollama model, embedding model, and MinerU command health.
+
+```json
+{
+  "status": "ok",
+  "model": "evidencopilot:latest",
+  "embedding_model": "nomic-embed-text",
+  "ollama": {
+    "ok": true,
+    "model_available": true,
+    "embedding_model_available": true
+  },
+  "mineru": {
+    "ok": true,
+    "command": "E:\\Code\\SEP490\\.venv-mineru\\Scripts\\mineru.exe",
+    "resolved": "E:\\Code\\SEP490\\.venv-mineru\\Scripts\\mineru.exe",
+    "method": "auto",
+    "backend": "pipeline"
+  }
+}
+```
 
 `POST /extract`
 

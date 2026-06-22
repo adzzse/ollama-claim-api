@@ -2,7 +2,7 @@ import logging
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 
-from app.extraction import ExtractionError, extract_upload_markdown
+from app.extraction import ExtractionError, check_mineru, extract_upload_markdown
 from app.logging_config import configure_app_logging
 from app.models import (
     ClaimAnalysisRequest,
@@ -39,6 +39,10 @@ async def check_ollama_health(
     return await check_ollama(settings)
 
 
+def check_mineru_health() -> dict:
+    return check_mineru()
+
+
 async def run_claim_analysis(
     payload: ClaimAnalysisRequest,
     settings: Settings = Depends(get_settings),
@@ -50,11 +54,14 @@ async def run_claim_analysis(
 async def health(
     settings: Settings = Depends(get_settings),
     ollama_status: dict = Depends(check_ollama_health),
+    mineru_status: dict = Depends(check_mineru_health),
 ) -> dict:
     return {
         "status": "ok",
         "model": settings.ollama_model,
+        "embedding_model": settings.ollama_embedding_model,
         "ollama": ollama_status,
+        "mineru": mineru_status,
     }
 
 

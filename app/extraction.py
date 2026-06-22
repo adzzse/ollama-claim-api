@@ -34,6 +34,19 @@ class ExtractedMarkdown:
     markdown: str
 
 
+def check_mineru() -> dict:
+    load_runtime_env()
+    command = os.getenv("MINERU_COMMAND", "mineru")
+    resolved = shutil.which(command)
+    return {
+        "ok": resolved is not None,
+        "command": command,
+        "resolved": resolved,
+        "method": os.getenv("MINERU_METHOD", "auto"),
+        "backend": os.getenv("MINERU_BACKEND"),
+    }
+
+
 async def extract_upload_markdown(file: UploadFile) -> ExtractedMarkdown:
     raw = await file.read()
     filename = file.filename or "uploaded-file"

@@ -58,8 +58,18 @@ async def check_ollama(settings: Settings) -> dict[str, Any]:
     model_names = {model.get("name") for model in data.get("models", [])}
     return {
         "ok": True,
-        "model_available": settings.ollama_model in model_names,
+        "model_available": _model_available(settings.ollama_model, model_names),
+        "embedding_model_available": _model_available(settings.ollama_embedding_model, model_names),
     }
+
+
+def _model_available(configured_model: str, available_models: set[str | None]) -> bool:
+    normalized = {model for model in available_models if model}
+    if configured_model in normalized:
+        return True
+    if ":" not in configured_model and f"{configured_model}:latest" in normalized:
+        return True
+    return any(model.split(":", 1)[0] == configured_model for model in normalized)
 
 
 async def analyze_claim(payload: ClaimAnalysisRequest, settings: Settings) -> ClaimAnalysisResponse:

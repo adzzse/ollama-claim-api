@@ -164,11 +164,25 @@ def test_process_claim_returns_502_when_model_json_is_invalid(client: TestClient
 
 def test_health_returns_ollama_status(client: TestClient):
     async def fake_health():
-        return {"ok": True, "model_available": True}
+        return {
+            "ok": True,
+            "model_available": True,
+            "embedding_model_available": True,
+        }
 
-    from app.main import check_ollama_health
+    def fake_mineru_health():
+        return {
+            "ok": True,
+            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "method": "auto",
+            "backend": "pipeline",
+        }
+
+    from app.main import check_mineru_health, check_ollama_health
 
     app.dependency_overrides[check_ollama_health] = fake_health
+    app.dependency_overrides[check_mineru_health] = fake_mineru_health
 
     response = client.get("/health")
 
@@ -176,7 +190,77 @@ def test_health_returns_ollama_status(client: TestClient):
     assert response.json() == {
         "status": "ok",
         "model": "evidencopilot:latest",
-        "ollama": {"ok": True, "model_available": True},
+        "embedding_model": "nomic-embed-text",
+        "ollama": {
+            "ok": True,
+            "model_available": True,
+            "embedding_model_available": True,
+        },
+        "mineru": {
+            "ok": True,
+            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "method": "auto",
+            "backend": "pipeline",
+        },
+    }
+
+
+def test_ollama_health_checks_embedding_model_alias(monkeypatch):
+    import asyncio
+    from app.ollama_client import check_ollama
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": "evidencopilot:latest"},
+                    {"name": "nomic-embed-text:latest"},
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def get(self, url):
+            assert url.endswith("/api/tags")
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(check_ollama(Settings()))
+
+    assert result == {
+        "ok": True,
+        "model_available": True,
+        "embedding_model_available": True,
+    }
+
+
+def test_mineru_health_reports_command_resolution(monkeypatch):
+    from app.extraction import check_mineru
+
+    monkeypatch.setenv("MINERU_COMMAND", r"E:\MinerU\mineru.exe")
+    monkeypatch.setenv("MINERU_METHOD", "auto")
+    monkeypatch.setenv("MINERU_BACKEND", "pipeline")
+    monkeypatch.setattr("app.extraction.shutil.which", lambda command: command)
+
+    assert check_mineru() == {
+        "ok": True,
+        "command": r"E:\MinerU\mineru.exe",
+        "resolved": r"E:\MinerU\mineru.exe",
+        "method": "auto",
+        "backend": "pipeline",
     }
 
 
