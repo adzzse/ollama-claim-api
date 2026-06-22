@@ -1,13 +1,14 @@
-# Ollama Claim Analysis API
+# EvidencePilot Python AI Worker
 
-Standalone FastAPI service for demoing EvidencePilot AI flows with local Ollama/Qwen.
+Stateless FastAPI worker for the Java backend.
 
-It supports two demo workflows:
+Java owns uploads, persistence, source/chunk/reference records, graph JSON, auth, projects, datasets, and orchestration. This service only runs AI worker functions:
 
-- Claim evidence matching: upload source files, then match a user claim against extracted source chunks.
-- Paper structure review: upload a user paper, then review missing or weak sections for a target style.
+- MinerU document extraction
+- Ollama text generation and claim analysis
+- Ollama embeddings
 
-The demo backend stores uploaded sources and papers in memory. Restarting `uvicorn` clears them.
+The Java backend calls this service with `AI_MODEL_BASE_URL`, for example `AI_MODEL_BASE_URL=http://host.docker.internal:8000`.
 
 ## Setup
 
@@ -19,20 +20,10 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-The local demo API does not require an API key.
-
-Optional ngrok setup for exposing the local API:
+Build the project Ollama model once:
 
 ```powershell
-winget install Ngrok.Ngrok
-ngrok update
-ngrok config add-authtoken <your ngrok authtoken>
-```
-
-If `ngrok` is installed by WinGet but is not on `PATH`, use the generated shim path when starting the tunnel:
-
-```text
-C:\Users\HoangAnhDo\AppData\Local\Microsoft\WinGet\Links\ngrok.exe
+ollama create evidencopilot -f Modelfile
 ```
 
 ## Run
@@ -43,269 +34,90 @@ cd E:\Code\SEP490\ollama-claim-api
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-To see detailed processing logs for upload, extraction, chunking, reference extraction, matching, and paper review:
+For detailed logs:
 
 ```powershell
 $env:LOG_LEVEL = 'DEBUG'
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-When MinerU runs, DEBUG logs also stream MinerU `stdout` and `stderr` lines with `mineru stdout ...` and `mineru stderr ...` prefixes.
+## MinerU
 
-For `/process/claim`, the terminal logs the AI request summary, parsed verdict, confidence, matched source IDs, missing evidence, and returned explanation. With `LOG_LEVEL=DEBUG`, it also logs the full prompt, raw model JSON response, and the model-provided `reasoning_summary`.
-
-## Run With Ngrok
-
-Start the local API and expose it through ngrok:
-
-```powershell
-cd E:\Code\SEP490\ollama-claim-api
-.\.venv\Scripts\Activate.ps1
-python scripts\start_ngrok_tunnel.py
-```
-
-The script starts `uvicorn` on `http://127.0.0.1:8000`, then starts `ngrok http http://127.0.0.1:8000`. Copy the public `Forwarding` HTTPS URL from the ngrok output.
-
-Before starting the local API, the script runs `ngrok diagnose`. If ngrok cannot establish TLS to its tunnel servers, the script exits before starting `uvicorn` so it does not sit in a reconnect loop.
-
-If you see `failed to fetch CRL` or `ERR_NGROK_8008`, the local API is not the failing layer. Check VPN/proxy/firewall TLS inspection, system time, and whether the network allows ngrok's TLS and certificate revocation-list checks:
-
-```powershell
-ngrok diagnose
-```
-
-If PowerShell cannot find `ngrok`, pass the full executable path:
-
-```powershell
-python scripts\start_ngrok_tunnel.py `
-  --ngrok-path C:\Users\HoangAnhDo\AppData\Local\Microsoft\WinGet\Links\ngrok.exe
-```
-
-If the backend is already running in another terminal, start only the tunnel:
-
-```powershell
-python scripts\start_ngrok_tunnel.py --no-server
-```
-
-Run the demo script against the ngrok URL:
-
-```powershell
-python scripts\demo_all_endpoints.py `
-  --base-url https://your-forwarding-url.ngrok-free.dev
-```
-
-Build the project-specific Ollama model once:
-
-```powershell
-ollama create evidencopilot -f Modelfile
-```
-
-Keep Ollama running locally with the model:
-
-```powershell
-ollama list
-```
-
-Expected model:
-
-```text
-evidencopilot:latest
-```
-
-## Local Requests
-
-Health:
-
-```powershell
-Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8000/health
-```
-
-Analyze a claim:
-
-```powershell
-$body = @{
-  claim = 'Traceable evidence improves review quality.'
-  source_id = 'source-1'
-  title = 'agile-risk-management.pdf'
-  excerpt = 'Evidence traceability links claims to source material so reviewers can evaluate support quality.'
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8000/process/claim `
-  -ContentType 'application/json' `
-  -Body $body
-```
-
-## Demo Flow: Upload Sources And Match A Claim
-
-Upload one or more `.txt`, `.md`, `.docx`, or clean text-based `.pdf` sources:
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8000/sources `
-  -F "files=@E:\Code\SEP490\ollama-claim-api\sources\example-source.txt"
-```
-
-For `.pdf` and `.docx` uploads, the backend tries MinerU first and uses the generated Markdown as the extracted text. If the `mineru` command is not installed or the MinerU run fails, the backend falls back to the built-in PyMuPDF / `python-docx` extractors.
-
-Install MinerU separately when you want higher-fidelity parsing:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-pip install "mineru[core]"
-```
-
-Optional MinerU settings in `.env`:
-
-```text
-MINERU_COMMAND=mineru
-MINERU_METHOD=auto
-MINERU_TIMEOUT_SECONDS=600
-LOG_LEVEL=INFO
-```
-
-If MinerU is installed in a separate virtual environment, point `MINERU_COMMAND` at the full executable path, for example:
+For document extraction, install MinerU separately and point `MINERU_COMMAND` at the executable if needed:
 
 ```text
 MINERU_COMMAND=E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe
+MINERU_BACKEND=pipeline
+MINERU_METHOD=auto
+MINERU_TIMEOUT_SECONDS=600
 ```
 
-List ingested sources:
+`MINERU_BACKEND=pipeline` is useful on this local CPU-only MinerU setup.
 
-```powershell
-Invoke-RestMethod -Method Get `
-  -Uri http://127.0.0.1:8000/sources
-```
+## Endpoints
 
-Export extracted references as JSON for graph features:
+`GET /health`
 
-```powershell
-Invoke-RestMethod -Method Get `
-  -Uri http://127.0.0.1:8000/sources/references
-```
+Returns service and Ollama health.
 
-Response shape:
+`POST /extract`
+
+Multipart form field: `file`
+
+Returns extracted Markdown only. It does not create source records or persist upload state.
 
 ```json
 {
-  "references": [
-    {
-      "id": "source-1-ref-1",
-      "source_id": "source-1",
-      "filename": "example-source.txt",
-      "raw_text": "Smith, J. (2024). Evidence Traceability for Review Workflows. Journal of Review Systems.",
-      "title": "Evidence Traceability for Review Workflows",
-      "year": 2024
-    }
-  ]
+  "filename": "original.pdf",
+  "method": "mineru",
+  "markdown": "# Extracted document\n\n..."
 }
 ```
 
-Match a claim against stored source chunks:
+PowerShell example:
 
 ```powershell
-$body = @{
-  claim = 'Traceable evidence improves review quality.'
-  top_k = 5
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8000/match/claim `
-  -ContentType 'application/json' `
-  -Body $body
+curl.exe -X POST http://127.0.0.1:8000/extract `
+  -F "file=@E:\Code\SEP490\sources\example.pdf"
 ```
 
-Response shape:
+`POST /ai/embeddings`
 
 ```json
 {
-  "claim": "Traceable evidence improves review quality.",
-  "matches": [
-    {
-      "source_id": "source-1",
-      "filename": "example-source.pdf",
-      "chunk_id": "source-1-chunk-1",
-      "page": null,
-      "excerpt": "Evidence traceability links claims to source material...",
-      "score": 0.62,
-      "suitability": "strong",
-      "explanation": "This source chunk shares strong terminology with the claim and is a good candidate for review."
-    }
-  ]
+  "text": "Evidence traceability links claims to source material."
 }
 ```
 
-This matching endpoint uses deterministic keyword scoring for demo reliability. The `/process/claim` endpoint calls Qwen/Ollama for final claim support judgment when you already have one selected excerpt.
-
-## Demo Flow: Upload And Review A Paper
-
-Upload a user paper:
-
-```powershell
-curl.exe -X POST http://127.0.0.1:8000/papers `
-  -F "file=@E:\Code\SEP490\sources\student-paper.docx"
-```
-
-Review it against a target style:
-
-```powershell
-$body = @{
-  paper_id = 'paper-1'
-  target_style = 'conference'
-  use_ai = $true
-} | ConvertTo-Json
-
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8000/review/paper `
-  -ContentType 'application/json' `
-  -Body $body
-```
-
-If `target_style` is omitted, the backend uses the auto-detected style. `use_ai` defaults to `false` for the fast local rule scan; set it to `true` to call Ollama for the paper review. Supported target styles:
-
-```text
-conference, article, magazine, report, thesis
-```
-
-Response shape:
+Response:
 
 ```json
 {
-  "paper_id": "paper-1",
-  "detected_style": "conference",
-  "target_style": "conference",
-  "missing_sections": [
-    {
-      "section": "Methodology",
-      "issue": "Methodology is expected for a conference paper but was not found.",
-      "recommendation": "Add a Methodology section or rename the matching content clearly."
-    }
-  ],
-  "weak_sections": [],
-  "claim_recommendations": []
+  "embedding": [0.1, -0.2, 0.3]
 }
 ```
 
-## Cloudflare Tunnel
+`POST /ai/generate`
 
-Forward the public HTTPS hostname to the local service:
-
-```text
-http://127.0.0.1:8000
+```json
+{
+  "prompt": "Explain evidence traceability."
+}
 ```
 
-Protect the hostname with Cloudflare Access service tokens before exposing this local demo outside your machine.
+Response:
 
-Remote requests should include:
-
-```text
-CF-Access-Client-Id: <cloudflare service token id>
-CF-Access-Client-Secret: <cloudflare service token secret>
-Content-Type: application/json
+```json
+{
+  "model": "evidencopilot:latest",
+  "response": "Generated text...",
+  "done": true
+}
 ```
-
-## API Contract
 
 `POST /process/claim`
+
+Kept for Java flows that still delegate claim verdict/explanation generation.
 
 ```json
 {
@@ -328,62 +140,25 @@ Response:
 }
 ```
 
-Allowed verdicts: `supported`, `partially_supported`, `unsupported`, `unclear`.
+## Ngrok
+
+Start the local API and expose it through ngrok:
+
+```powershell
+cd E:\Code\SEP490\ollama-claim-api
+.\.venv\Scripts\Activate.ps1
+python scripts\start_ngrok_tunnel.py
+```
+
+If the backend is already running in another terminal, start only the tunnel:
+
+```powershell
+python scripts\start_ngrok_tunnel.py --no-server
+```
 
 ## Tests
 
 ```powershell
 cd E:\Code\SEP490\ollama-claim-api
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest -q
 ```
-
-## Ready Demo Test For All Endpoints
-
-Start the backend first:
-
-```powershell
-cd E:\Code\SEP490\ollama-claim-api
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-In another PowerShell window, run the all-endpoint demo test:
-
-```powershell
-cd E:\Code\SEP490\ollama-claim-api
-.\.venv\Scripts\Activate.ps1
-python scripts\demo_all_endpoints.py
-```
-
-To make the paper-review demo call Ollama, add `--review-paper-ai`:
-
-```powershell
-python scripts\demo_all_endpoints.py --review-paper-ai
-```
-
-The local demo does not require `--api-key`; the flag remains only for compatibility with an external proxy that expects one.
-
-The script automatically creates demo `.txt` files and tests:
-
-```text
-GET  /health
-POST /sources
-GET  /sources
-GET  /sources/references
-POST /match/claim
-POST /papers
-POST /review/paper
-POST /process/claim
-```
-
-For Cloudflare Tunnel, pass the public URL and keep your Cloudflare Access token values in environment variables:
-
-```powershell
-$env:CF_ACCESS_CLIENT_ID = '<cloudflare service token id>'
-$env:CF_ACCESS_CLIENT_SECRET = '<cloudflare service token secret>'
-
-python scripts\demo_all_endpoints.py `
-  --base-url https://api.yourdomain.com
-```
-
-The script prints the JSON response from every endpoint. If any endpoint fails, it stops with the HTTP error.
