@@ -12,6 +12,7 @@ from app.models import (
     ExtractResponse,
     GenerateRequest,
     GenerateResponse,
+    ModelsResponse,
 )
 from app.ollama_client import (
     OllamaInvalidResponseError,
@@ -19,7 +20,8 @@ from app.ollama_client import (
     analyze_claim,
     check_ollama,
     generate_embeddings,
-    generate_text,
+    generate_response,
+    list_models,
 )
 from app.settings import Settings, load_settings
 
@@ -72,14 +74,6 @@ async def ai_models(
     return await list_models(settings)
 
 
-@app.post("/ai/generate", response_model=GenerateResponse)
-async def ai_generate(
-    payload: GenerateRequest,
-    settings: Settings = Depends(get_settings),
-) -> GenerateResponse:
-    return await generate_response(payload, settings)
-
-
 @app.post("/process/claim", response_model=ClaimAnalysisResponse)
 async def process_claim(
     result: ClaimAnalysisResponse = Depends(run_claim_analysis),
@@ -126,7 +120,7 @@ async def run_generate_text(
         len(payload.prompt),
         settings.ollama_model,
     )
-    result = await generate_text(payload.prompt, settings)
+    result = GenerateResponse.model_validate(await generate_response(payload, settings))
     logger.debug(
         "generate complete prompt_chars=%s response_chars=%s",
         len(payload.prompt),

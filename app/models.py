@@ -6,26 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 Verdict = Literal["supported", "partially_supported", "unsupported", "unclear"]
 
 
-class GenerateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    prompt: str = Field(min_length=1, max_length=12000)
-
-    @field_validator("prompt")
-    @classmethod
-    def strip_prompt(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("prompt must not be empty")
-        return stripped
-
-
-class GenerateResponse(BaseModel):
-    model: str
-    response: str
-    done: bool
-
-
 class ModelSummary(BaseModel):
     name: str
 
@@ -87,6 +67,8 @@ class ExtractResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     prompt: str = Field(min_length=1, max_length=12000)
 
     @field_validator("prompt")

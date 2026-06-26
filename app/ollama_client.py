@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from app.models import ClaimAnalysisRequest, ClaimAnalysisResponse, GenerateResponse
+from app.models import ClaimAnalysisRequest, ClaimAnalysisResponse, GenerateRequest, GenerateResponse, ModelsResponse
 from app.settings import Settings
 
 
@@ -128,6 +128,26 @@ async def analyze_claim(payload: ClaimAnalysisRequest, settings: Settings) -> Cl
     except (KeyError, TypeError, ValueError, ValidationError) as exc:
         logger.info("ai response invalid reason=%s", exc)
         raise OllamaInvalidResponseError("Ollama returned invalid claim-analysis JSON") from exc
+
+
+async def list_models(settings: Settings) -> ModelsResponse:
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{settings.ollama_base_url}/api/tags")
+            response.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException) as exc:
+        logger.info("models request failed reason=%s", exc)
+        raise OllamaUnavailableError("Ollama models request failed") from exc
+
+    try:
+        return ModelsResponse.model_validate(response.json())
+    except (TypeError, ValueError, ValidationError) as exc:
+        logger.info("models response invalid reason=%s", exc)
+        raise OllamaInvalidResponseError("Ollama returned invalid models response") from exc
+
+
+async def generate_response(payload: GenerateRequest, settings: Settings) -> GenerateResponse:
+    return await generate_text(payload.prompt, settings)
 
 
 async def generate_text(prompt: str, settings: Settings) -> GenerateResponse:
