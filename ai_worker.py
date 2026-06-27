@@ -11,7 +11,6 @@ import pika
 
 from app.ollama_client import generate_embeddings
 from app.settings import load_settings
-from app.store import chunk_text_for_demo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,8 +40,28 @@ def extract_pdf_text(filepath: str) -> str:
     return "\n\n".join(pages).strip()
 
 
+def chunk_document_text(text: str, max_chars: int = 900) -> list[str]:
+    logger.debug("chunk text start text_chars=%s max_chars=%s", len(text), max_chars)
+    paragraphs = [part.strip() for part in text.split("\n") if part.strip()]
+    chunks: list[str] = []
+    current = ""
+    for paragraph in paragraphs:
+        candidate = f"{current}\n{paragraph}".strip() if current else paragraph
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = paragraph[:max_chars]
+    if current:
+        chunks.append(current)
+    result = chunks or [text[:max_chars]]
+    logger.debug("chunk text complete paragraphs=%s chunks=%s", len(paragraphs), len(result))
+    return result
+
+
 async def build_chunks(document_id: str, text: str, settings) -> dict:
-    raw_chunks = chunk_text_for_demo(text)
+    raw_chunks = chunk_document_text(text)
     chunks = []
     for i, chunk_text in enumerate(raw_chunks):
         embedding = await generate_embeddings(chunk_text, settings)
