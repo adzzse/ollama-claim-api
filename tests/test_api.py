@@ -7,10 +7,8 @@ from app.ollama_client import (
     OllamaInvalidResponseError,
     OllamaUnavailableError,
     analyze_claim,
-    analyze_paper_review,
 )
 from app.settings import Settings
-from app.store import PaperRecord, PaperSection
 
 
 API_KEY = "test-key"
@@ -166,11 +164,25 @@ def test_process_claim_returns_502_when_model_json_is_invalid(client: TestClient
 
 def test_health_returns_ollama_status(client: TestClient):
     async def fake_health():
-        return {"ok": True, "model_available": True}
+        return {
+            "ok": True,
+            "model_available": True,
+            "embedding_model_available": True,
+        }
 
-    from app.main import check_ollama_health
+    def fake_mineru_health():
+        return {
+            "ok": True,
+            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "method": "auto",
+            "backend": "pipeline",
+        }
+
+    from app.main import check_mineru_health, check_ollama_health
 
     app.dependency_overrides[check_ollama_health] = fake_health
+    app.dependency_overrides[check_mineru_health] = fake_mineru_health
 
     response = client.get("/health")
 
@@ -178,8 +190,202 @@ def test_health_returns_ollama_status(client: TestClient):
     assert response.json() == {
         "status": "ok",
         "model": "evidencopilot:latest",
-        "ollama": {"ok": True, "model_available": True},
+        "embedding_model": "nomic-embed-text",
+        "ollama": {
+            "ok": True,
+            "model_available": True,
+            "embedding_model_available": True,
+        },
+        "mineru": {
+            "ok": True,
+            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
+            "method": "auto",
+            "backend": "pipeline",
+        },
     }
+
+
+def test_ollama_health_checks_embedding_model_alias(monkeypatch):
+    import asyncio
+    from app.ollama_client import check_ollama
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": "evidencopilot:latest"},
+                    {"name": "nomic-embed-text:latest"},
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def get(self, url):
+            assert url.endswith("/api/tags")
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(check_ollama(Settings()))
+
+    assert result == {
+        "ok": True,
+        "model_available": True,
+        "embedding_model_available": True,
+    }
+
+
+def test_mineru_health_reports_command_resolution(monkeypatch):
+    from app.extraction import check_mineru
+
+    monkeypatch.setenv("MINERU_COMMAND", r"E:\MinerU\mineru.exe")
+    monkeypatch.setenv("MINERU_METHOD", "auto")
+    monkeypatch.setenv("MINERU_BACKEND", "pipeline")
+    monkeypatch.setattr("app.extraction.shutil.which", lambda command: command)
+
+    assert check_mineru() == {
+        "ok": True,
+        "command": r"E:\MinerU\mineru.exe",
+        "resolved": r"E:\MinerU\mineru.exe",
+        "method": "auto",
+        "backend": "pipeline",
+    }
+
+
+def test_extract_pdf_returns_mineru_markdown_without_storing_source(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_extract_with_mineru(filename: str, raw: bytes) -> str:
+        assert filename == "original.pdf"
+        assert raw == b"%PDF not a real file"
+        return "# Extracted document\n\nMinerU markdown."
+
+    monkeypatch.setattr("app.extraction.extract_with_mineru", fake_extract_with_mineru)
+
+    response = client.post(
+        "/extract",
+        files={"file": ("original.pdf", b"%PDF not a real file", "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "filename": "original.pdf",
+        "method": "mineru",
+        "markdown": "# Extracted document\n\nMinerU markdown.",
+    }
+
+
+def test_demo_storage_routes_are_not_exposed(client: TestClient):
+    post_sources = client.post(
+        "/sources",
+        files={"files": ("source.txt", b"source text", "text/plain")},
+    )
+    match_claim = client.post("/match/claim", json={"claim": "A claim."})
+    post_papers = client.post(
+        "/papers",
+        files={"file": ("paper.txt", b"paper text", "text/plain")},
+    )
+    review_paper = client.post("/review/paper", json={"paper_id": "paper-1"})
+
+    assert post_sources.status_code == 404
+    assert client.get("/sources").status_code == 404
+    assert client.get("/sources/references").status_code == 404
+    assert match_claim.status_code == 404
+    assert post_papers.status_code == 404
+    assert review_paper.status_code == 404
+
+
+def test_extract_returns_json_error_when_mineru_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from app.extraction import MinerUExtractionError
+
+    def fake_extract_with_mineru(filename: str, raw: bytes) -> str:
+        raise MinerUExtractionError("MinerU extraction failed: bad document")
+
+    monkeypatch.setattr("app.extraction.extract_with_mineru", fake_extract_with_mineru)
+
+    response = client.post(
+        "/extract",
+        files={"file": ("broken.pdf", b"%PDF broken", "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "MinerU extraction failed: bad document"
+
+
+def test_generate_text_success(client: TestClient):
+    from app.main import run_generate_text
+    from app.models import GenerateResponse
+
+    async def fake_run_generate_text():
+        return GenerateResponse(model="evidencopilot:latest", response="Generated answer.", done=True)
+
+    app.dependency_overrides[run_generate_text] = fake_run_generate_text
+
+    response = client.post("/ai/generate", json={"prompt": "Explain traceability."})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "model": "evidencopilot:latest",
+        "response": "Generated answer.",
+        "done": True,
+    }
+
+
+def test_generate_text_client_success(monkeypatch):
+    import asyncio
+    from app.ollama_client import generate_text
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "model": "evidencopilot:latest",
+                "response": "Generated answer.",
+                "done": True,
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            assert url.endswith("/api/generate")
+            assert json["prompt"] == "Explain traceability."
+            assert json["model"] == "evidencopilot:latest"
+            assert json["stream"] is False
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(generate_text("Explain traceability.", Settings()))
+
+    assert result.model == "evidencopilot:latest"
+    assert result.response == "Generated answer."
+    assert result.done is True
 
 
 def test_analyze_claim_logs_ai_verdict_and_explanation(monkeypatch, caplog):
@@ -240,120 +446,6 @@ def test_analyze_claim_logs_ai_verdict_and_explanation(monkeypatch, caplog):
         "ai explanation The source directly links traceability to review quality." in message
         for message in messages
     )
-
-
-def test_analyze_paper_review_uses_configured_timeout(monkeypatch):
-    import asyncio
-    import json
-
-    captured_timeouts = []
-
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "response": json.dumps(
-                    {
-                        "paper_id": "paper-1",
-                        "detected_style": "conference",
-                        "target_style": "conference",
-                        "missing_sections": [],
-                        "weak_sections": [],
-                        "claim_recommendations": [],
-                        "reasoning_summary": "I checked the requested style against the provided sections.",
-                    }
-                )
-            }
-
-    class FakeAsyncClient:
-        def __init__(self, timeout):
-            captured_timeouts.append(timeout)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, traceback):
-            return False
-
-        async def post(self, url, json):
-            return FakeResponse()
-
-    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
-    record = PaperRecord(
-        id="paper-1",
-        filename="paper.txt",
-        text="Abstract\nTraceability study.",
-        sections=[PaperSection(name="Abstract", text="Traceability study.")],
-    )
-
-    asyncio.run(
-        analyze_paper_review(
-            record,
-            "conference",
-            {
-                "paper_id": "paper-1",
-                "detected_style": "conference",
-                "target_style": "conference",
-                "missing_sections": [],
-                "weak_sections": [],
-                "claim_recommendations": [],
-            },
-            Settings(ollama_paper_timeout_seconds=321.0),
-        )
-    )
-
-    assert captured_timeouts == [321.0]
-
-
-def test_analyze_paper_review_logs_timeout_exception_type(monkeypatch, caplog):
-    import asyncio
-    import logging
-
-    import httpx
-
-    class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, traceback):
-            return False
-
-        async def post(self, url, json):
-            raise httpx.ReadTimeout("")
-
-    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
-    caplog.set_level(logging.INFO, logger="app.ollama_client")
-    record = PaperRecord(
-        id="paper-1",
-        filename="paper.txt",
-        text="Abstract\nTraceability study.",
-        sections=[PaperSection(name="Abstract", text="Traceability study.")],
-    )
-
-    with pytest.raises(OllamaUnavailableError):
-        asyncio.run(
-            analyze_paper_review(
-                record,
-                "conference",
-                {
-                    "paper_id": "paper-1",
-                    "detected_style": "conference",
-                    "target_style": "conference",
-                    "missing_sections": [],
-                    "weak_sections": [],
-                    "claim_recommendations": [],
-                },
-                Settings(ollama_paper_timeout_seconds=321.0),
-            )
-        )
-
-    assert "paper ai request failed model=evidencopilot:latest exception_type=ReadTimeout" in caplog.text
-    assert "timeout_seconds=321.0" in caplog.text
 
 
 def test_get_embeddings_success(client: TestClient):
