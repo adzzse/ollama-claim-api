@@ -5,7 +5,6 @@ import tempfile
 import threading
 import uuid
 
-import fitz
 from minio import Minio
 import pika
 import requests
@@ -31,59 +30,13 @@ RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "RabbitMqAdminPass123!")
 RABBITMQ_INPUT_QUEUE = os.getenv("RABBITMQ_INPUT_QUEUE", "extraction.queue")
 RABBITMQ_OUTPUT_QUEUE = os.getenv("RABBITMQ_OUTPUT_QUEUE", "extraction.result.queue")
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://good-lumpish-headstone.ngrok-free.dev")
-OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", os.getenv("OLLAMA_BASE_URL", "https://good-lumpish-headstone.ngrok-free.dev"))
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = "evidence_chunks"
 EMBEDDING_DIM = 768
 
-
-def extract_pdf_text(filepath: str) -> str:
-    doc = fitz.open(filepath)
-    try:
-        pages = [page.get_text("text") for page in doc]
-    finally:
-        doc.close()
-    return "\n\n".join(pages).strip()
-
-
-def chunk_text(text: str, max_chars: int = 900) -> list[str]:
-    paragraphs = [part.strip() for part in text.split("\n") if part.strip()]
-    chunks: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        candidate = f"{current}\n{paragraph}".strip() if current else paragraph
-        if len(candidate) <= max_chars:
-            current = candidate
-        else:
-            if current:
-                chunks.append(current)
-            current = paragraph[:max_chars]
-    if current:
-        chunks.append(current)
-    return chunks or [text[:max_chars]]
-
-
 HEADERS = {"ngrok-skip-browser-warning": "true"}
-
-
-def embed_text(text: str) -> list[float]:
-    response = requests.post(
-        f"{OLLAMA_BASE_URL}/ai/embeddings",
-        json={"model": OLLAMA_EMBEDDING_MODEL, "prompt": text},
-        headers=HEADERS,
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
-    embedding = data.get("embedding")
-    if embedding is not None:
-        return embedding
-    embeddings = data.get("embeddings")
-    if embeddings and isinstance(embeddings, list):
-        return embeddings[0]
-    raise ValueError("No embedding vector in Ollama response")
 
 
 def process_document(
@@ -104,32 +57,38 @@ def process_document(
         minio_client.fget_object(MINIO_BUCKET, pdf_object, tmp_path)
         logger.info("Downloaded %s from MinIO", pdf_object)
 
-        text = extract_pdf_text(tmp_path)
-        logger.info("Extracted %d chars from PDF", len(text))
+        with open(tmp_path, "rb") as f:
+            response = requests.post(
+                f"{FASTAPI_BASE_URL}/ai/process-document",
+                files={"file": (f"{document_id}.pdf", f, "application/pdf")},
+                headers=HEADERS,
+                timeout=600,
+            )
+        response.raise_for_status()
+        result = response.json()
 
-        raw_chunks = chunk_text(text)
-        logger.info("Chunked into %d chunks", len(raw_chunks))
+        if result.get("status") != "SUCCESS":
+            raise RuntimeError(f"Pipeline returned status={result.get('status')}: {result.get('detail', 'unknown error')}")
+
+        chunks_data = result.get("data", [])
+        if not chunks_data:
+            raise RuntimeError("Pipeline returned zero chunks")
+
+        logger.info("Got %d chunks from pipeline for documentId=%s", len(chunks_data), document_id)
 
         points: list[PointStruct] = []
-        for i, chunk_text_val in enumerate(raw_chunks):
-            embedding = embed_text(chunk_text_val)
+        for entry in chunks_data:
             point_id = str(uuid.uuid4())
             points.append(
                 PointStruct(
                     id=point_id,
-                    vector=embedding,
+                    vector=entry["embedding"],
                     payload={
                         "documentId": document_id,
-                        "chunkIndex": i + 1,
-                        "text": chunk_text_val,
+                        "chunkIndex": entry["chunkIndex"],
+                        "text": entry["text"],
                     },
                 )
-            )
-            logger.debug(
-                "Embedded chunk %d/%d for documentId=%s",
-                i + 1,
-                len(raw_chunks),
-                document_id,
             )
 
         qdrant_client.upsert(
@@ -232,8 +191,6 @@ def main():
         )
     )
     channel = connection.channel()
-    channel.queue_declare(queue=RABBITMQ_INPUT_QUEUE, durable=True)
-    channel.queue_declare(queue=RABBITMQ_OUTPUT_QUEUE, durable=True)
     channel.basic_qos(prefetch_count=1)
     logger.info("Connected to RabbitMQ on %s:%s", RABBITMQ_HOST, RABBITMQ_PORT)
 
