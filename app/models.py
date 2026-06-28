@@ -119,3 +119,8 @@ class ChunkEmbedding(BaseModel):
 class ProcessDocumentResponse(BaseModel):
     status: Literal["SUCCESS"]
     data: list[ChunkEmbedding]
+
+
+class ProcessDocumentErrorResponse(BaseModel):
+    status: Literal["ERROR"]
+    detail: str
