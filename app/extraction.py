@@ -5,7 +5,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import threading
 
 from fastapi import UploadFile
 
@@ -129,39 +128,17 @@ def _run_mineru_process(args: list[str], timeout_seconds: int) -> tuple[int, str
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,
     )
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
-    threads = [
-        threading.Thread(target=_log_process_stream, args=(process.stdout, "stdout", stdout_lines), daemon=True),
-        threading.Thread(target=_log_process_stream, args=(process.stderr, "stderr", stderr_lines), daemon=True),
-    ]
-    for thread in threads:
-        thread.start()
 
     try:
-        returncode = process.wait(timeout=timeout_seconds)
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
         process.kill()
-        for thread in threads:
-            thread.join(timeout=1)
+        process.communicate()
         raise MinerUExtractionError("MinerU extraction timed out") from exc
 
-    for thread in threads:
-        thread.join()
-    return returncode, "\n".join(stdout_lines), "\n".join(stderr_lines)
-
-
-def _log_process_stream(stream, stream_name: str, lines: list[str]) -> None:
-    if stream is None:
-        return
-    for raw_line in stream:
-        line = raw_line.rstrip()
-        if not line:
-            continue
-        lines.append(line)
-        logger.debug("mineru %s %s", stream_name, line)
+    returncode = process.returncode
+    return returncode, stdout or "", stderr or ""
 
 
 def _read_mineru_markdown(output_dir: Path) -> str:

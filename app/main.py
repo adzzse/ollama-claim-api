@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
@@ -7,12 +8,14 @@ from app.logging_config import configure_app_logging
 from app.models import (
     ClaimAnalysisRequest,
     ClaimAnalysisResponse,
+    ChunkEmbedding,
     EmbeddingRequest,
     EmbeddingResponse,
     ExtractResponse,
     GenerateRequest,
     GenerateResponse,
     ModelsResponse,
+    ProcessDocumentResponse,
 )
 from app.ollama_client import (
     OllamaInvalidResponseError,
@@ -141,6 +144,41 @@ async def get_embeddings(
     result: EmbeddingResponse = Depends(run_generate_embeddings),
 ) -> EmbeddingResponse:
     return result
+
+
+def _chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100) -> list[str]:
+    if len(text) <= chunk_size:
+        return [text]
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        if end < len(text):
+            newline_pos = text.rfind("\n", start, end)
+            if newline_pos > start + chunk_size // 2:
+                end = newline_pos + 1
+        chunks.append(text[start:end])
+        start = end - overlap if end < len(text) else end
+    return chunks
+
+
+@app.post("/ai/process-document", response_model=ProcessDocumentResponse)
+async def process_document(
+    file: UploadFile = File(...),
+    settings: Settings = Depends(get_settings),
+) -> ProcessDocumentResponse:
+    extracted = await extract_upload_markdown(file)
+    chunks = _chunk_text(extracted.markdown)
+
+    async def embed_chunk(index: int, text: str) -> ChunkEmbedding:
+        vector = await generate_embeddings(text, settings)
+        return ChunkEmbedding(chunkIndex=index, text=text, embedding=vector)
+
+    results = await asyncio.gather(
+        *(embed_chunk(i, t) for i, t in enumerate(chunks))
+    )
+
+    return ProcessDocumentResponse(status="SUCCESS", data=list(results))
 
 
 @app.exception_handler(OllamaUnavailableError)
