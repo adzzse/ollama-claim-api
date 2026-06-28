@@ -6,7 +6,7 @@ In an EvidencePilot-style workflow, uploaded source documents are extracted into
 
 The local AI model should be used after retrieval to explain why a candidate excerpt is suitable. This keeps the context focused, makes the answer easier to audit, and avoids relying on the model to read long PDF or DOCX files directly.
 
-For scanned or complex PDF documents, MinerU should run before chunking. MinerU converts the document into cleaner Markdown text, preserving headings, tables, and reading order better than a basic text extractor.
+For scanned or complex PDF documents, LiteParse should run before chunking. LiteParse converts the document into cleaner Markdown text, preserving headings, tables, and reading order better than a basic text extractor.
 
 References
 

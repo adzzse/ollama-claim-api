@@ -108,19 +108,3 @@ class EmbeddingRequest(BaseModel):
 
 class EmbeddingResponse(BaseModel):
     embedding: list[float]
-
-
-class ChunkEmbedding(BaseModel):
-    chunkIndex: int
-    text: str
-    embedding: list[float]
-
-
-class ProcessDocumentResponse(BaseModel):
-    status: Literal["SUCCESS"]
-    data: list[ChunkEmbedding]
-
-
-class ProcessDocumentErrorResponse(BaseModel):
-    status: Literal["ERROR"]
-    detail: str

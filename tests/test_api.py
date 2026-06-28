@@ -287,6 +287,10 @@ def test_demo_storage_routes_are_not_exposed(client: TestClient):
         files={"file": ("paper.txt", b"paper text", "text/plain")},
     )
     review_paper = client.post("/review/paper", json={"paper_id": "paper-1"})
+    process_document = client.post(
+        "/ai/process-document",
+        files={"file": ("source.pdf", b"%PDF test", "application/pdf")},
+    )
 
     assert post_sources.status_code == 404
     assert client.get("/sources").status_code == 404
@@ -294,6 +298,7 @@ def test_demo_storage_routes_are_not_exposed(client: TestClient):
     assert match_claim.status_code == 404
     assert post_papers.status_code == 404
     assert review_paper.status_code == 404
+    assert process_document.status_code == 404
 
 
 def test_extract_returns_json_error_when_liteparse_fails(
