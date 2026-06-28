@@ -108,3 +108,22 @@ class EmbeddingRequest(BaseModel):
 
 class EmbeddingResponse(BaseModel):
     embedding: list[float]
+
+
+class SparseEmbedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("text must not be empty")
+        return stripped
+
+
+class SparseEmbedResponse(BaseModel):
+    indices: list[int]
+    values: list[float]

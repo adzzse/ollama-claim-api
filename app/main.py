@@ -13,6 +13,8 @@ from app.models import (
     GenerateRequest,
     GenerateResponse,
     ModelsResponse,
+    SparseEmbedRequest,
+    SparseEmbedResponse,
 )
 from app.ollama_client import (
     OllamaInvalidResponseError,
@@ -24,6 +26,7 @@ from app.ollama_client import (
     list_models,
 )
 from app.settings import Settings, load_settings
+from app.sparse import encode_sparse
 
 configure_app_logging()
 app = FastAPI(title="Ollama Claim Analysis API", version="0.2.0")
@@ -140,6 +143,11 @@ async def get_embeddings(
     result: EmbeddingResponse = Depends(run_generate_embeddings),
 ) -> EmbeddingResponse:
     return result
+
+
+@app.post("/api/sparse-embed", response_model=SparseEmbedResponse)
+async def sparse_embed(payload: SparseEmbedRequest) -> SparseEmbedResponse:
+    return SparseEmbedResponse.model_validate(encode_sparse(payload.text))
 
 
 @app.exception_handler(OllamaUnavailableError)
