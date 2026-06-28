@@ -4,7 +4,7 @@ Stateless FastAPI worker for the Java backend.
 
 Java owns uploads, persistence, source/chunk/reference records, graph JSON, auth, projects, datasets, and orchestration. This service only runs AI worker functions:
 
-- MinerU document extraction
+- LiteParse document extraction
 - Ollama text generation and claim analysis
 - Ollama embeddings
 
@@ -41,24 +41,11 @@ $env:LOG_LEVEL = 'DEBUG'
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## MinerU
-
-For document extraction, install MinerU separately and point `MINERU_COMMAND` at the executable if needed:
-
-```text
-MINERU_COMMAND=E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe
-MINERU_BACKEND=pipeline
-MINERU_METHOD=auto
-MINERU_TIMEOUT_SECONDS=600
-```
-
-`MINERU_BACKEND=pipeline` is useful on this local CPU-only MinerU setup.
-
 ## Endpoints
 
 `GET /health`
 
-Returns service, Ollama model, embedding model, and MinerU command health.
+Returns service, Ollama model, embedding model, and LiteParse package health.
 
 ```json
 {
@@ -70,12 +57,9 @@ Returns service, Ollama model, embedding model, and MinerU command health.
     "model_available": true,
     "embedding_model_available": true
   },
-  "mineru": {
+  "liteparse": {
     "ok": true,
-    "command": "E:\\Code\\SEP490\\.venv-mineru\\Scripts\\mineru.exe",
-    "resolved": "E:\\Code\\SEP490\\.venv-mineru\\Scripts\\mineru.exe",
-    "method": "auto",
-    "backend": "pipeline"
+    "package": "liteparse"
   }
 }
 ```
@@ -89,7 +73,7 @@ Returns extracted Markdown only. It does not create source records or persist up
 ```json
 {
   "filename": "original.pdf",
-  "method": "mineru",
+  "method": "liteparse",
   "markdown": "# Extracted document\n\n..."
 }
 ```

@@ -170,19 +170,16 @@ def test_health_returns_ollama_status(client: TestClient):
             "embedding_model_available": True,
         }
 
-    def fake_mineru_health():
+    def fake_liteparse_health():
         return {
             "ok": True,
-            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
-            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
-            "method": "auto",
-            "backend": "pipeline",
+            "package": "liteparse",
         }
 
-    from app.main import check_mineru_health, check_ollama_health
+    from app.main import check_liteparse_health, check_ollama_health
 
     app.dependency_overrides[check_ollama_health] = fake_health
-    app.dependency_overrides[check_mineru_health] = fake_mineru_health
+    app.dependency_overrides[check_liteparse_health] = fake_liteparse_health
 
     response = client.get("/health")
 
@@ -196,12 +193,9 @@ def test_health_returns_ollama_status(client: TestClient):
             "model_available": True,
             "embedding_model_available": True,
         },
-        "mineru": {
+        "liteparse": {
             "ok": True,
-            "command": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
-            "resolved": r"E:\Code\SEP490\.venv-mineru\Scripts\mineru.exe",
-            "method": "auto",
-            "backend": "pipeline",
+            "package": "liteparse",
         },
     }
 
@@ -247,33 +241,27 @@ def test_ollama_health_checks_embedding_model_alias(monkeypatch):
     }
 
 
-def test_mineru_health_reports_command_resolution(monkeypatch):
-    from app.extraction import check_mineru
+def test_liteparse_health_reports_package_availability(monkeypatch):
+    from app.extraction import check_liteparse
 
-    monkeypatch.setenv("MINERU_COMMAND", r"E:\MinerU\mineru.exe")
-    monkeypatch.setenv("MINERU_METHOD", "auto")
-    monkeypatch.setenv("MINERU_BACKEND", "pipeline")
-    monkeypatch.setattr("app.extraction.shutil.which", lambda command: command)
+    monkeypatch.setattr("app.extraction.importlib_util.find_spec", lambda package: object())
 
-    assert check_mineru() == {
+    assert check_liteparse() == {
         "ok": True,
-        "command": r"E:\MinerU\mineru.exe",
-        "resolved": r"E:\MinerU\mineru.exe",
-        "method": "auto",
-        "backend": "pipeline",
+        "package": "liteparse",
     }
 
 
-def test_extract_pdf_returns_mineru_markdown_without_storing_source(
+def test_extract_pdf_returns_liteparse_markdown_without_storing_source(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    def fake_extract_with_mineru(filename: str, raw: bytes) -> str:
+    def fake_extract_with_liteparse(filename: str, raw: bytes) -> str:
         assert filename == "original.pdf"
         assert raw == b"%PDF not a real file"
-        return "# Extracted document\n\nMinerU markdown."
+        return "# Extracted document\n\nLiteParse markdown."
 
-    monkeypatch.setattr("app.extraction.extract_with_mineru", fake_extract_with_mineru)
+    monkeypatch.setattr("app.extraction.extract_with_liteparse", fake_extract_with_liteparse)
 
     response = client.post(
         "/extract",
@@ -283,8 +271,8 @@ def test_extract_pdf_returns_mineru_markdown_without_storing_source(
     assert response.status_code == 200
     assert response.json() == {
         "filename": "original.pdf",
-        "method": "mineru",
-        "markdown": "# Extracted document\n\nMinerU markdown.",
+        "method": "liteparse",
+        "markdown": "# Extracted document\n\nLiteParse markdown.",
     }
 
 
@@ -308,16 +296,16 @@ def test_demo_storage_routes_are_not_exposed(client: TestClient):
     assert review_paper.status_code == 404
 
 
-def test_extract_returns_json_error_when_mineru_fails(
+def test_extract_returns_json_error_when_liteparse_fails(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    from app.extraction import MinerUExtractionError
+    from app.extraction import LiteParseExtractionError
 
-    def fake_extract_with_mineru(filename: str, raw: bytes) -> str:
-        raise MinerUExtractionError("MinerU extraction failed: bad document")
+    def fake_extract_with_liteparse(filename: str, raw: bytes) -> str:
+        raise LiteParseExtractionError("LiteParse extraction failed: bad document")
 
-    monkeypatch.setattr("app.extraction.extract_with_mineru", fake_extract_with_mineru)
+    monkeypatch.setattr("app.extraction.extract_with_liteparse", fake_extract_with_liteparse)
 
     response = client.post(
         "/extract",
@@ -325,7 +313,7 @@ def test_extract_returns_json_error_when_mineru_fails(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "MinerU extraction failed: bad document"
+    assert response.json()["detail"] == "LiteParse extraction failed: bad document"
 
 
 def test_generate_text_success(client: TestClient):

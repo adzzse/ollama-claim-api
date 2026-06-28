@@ -5,7 +5,7 @@ import time
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from app.extraction import ExtractionError, MinerUExtractionError, MinerUUnavailableError, check_mineru, extract_upload_markdown
+from app.extraction import ExtractionError, check_liteparse, extract_upload_markdown
 from app.logging_config import configure_app_logging
 from app.models import (
     ClaimAnalysisRequest,
@@ -50,8 +50,8 @@ async def check_ollama_health(
     return await check_ollama(settings)
 
 
-def check_mineru_health() -> dict:
-    return check_mineru()
+def check_liteparse_health() -> dict:
+    return check_liteparse()
 
 
 async def run_claim_analysis(
@@ -65,14 +65,14 @@ async def run_claim_analysis(
 async def health(
     settings: Settings = Depends(get_settings),
     ollama_status: dict = Depends(check_ollama_health),
-    mineru_status: dict = Depends(check_mineru_health),
+    liteparse_status: dict = Depends(check_liteparse_health),
 ) -> dict:
     return {
         "status": "ok",
         "model": settings.ollama_model,
         "embedding_model": settings.ollama_embedding_model,
         "ollama": ollama_status,
-        "mineru": mineru_status,
+        "liteparse": liteparse_status,
     }
 
 
@@ -229,7 +229,7 @@ async def process_document(
 ):
     try:
         extracted = await extract_upload_markdown(file)
-    except (ExtractionError, MinerUUnavailableError, MinerUExtractionError) as exc:
+    except ExtractionError as exc:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"status": "ERROR", "detail": str(exc)},

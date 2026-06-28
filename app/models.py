@@ -62,7 +62,7 @@ class ClaimAnalysisResponse(BaseModel):
 
 class ExtractResponse(BaseModel):
     filename: str
-    method: Literal["mineru", "text"]
+    method: Literal["liteparse", "text"]
     markdown: str = Field(min_length=1)
 
 

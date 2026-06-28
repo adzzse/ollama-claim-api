@@ -1,14 +1,10 @@
 from dataclasses import dataclass
+from importlib import util as importlib_util
 import logging
-import os
 from pathlib import Path
-import shutil
-import subprocess
 import tempfile
 
 from fastapi import UploadFile
-
-from app.env import load_runtime_env
 
 
 logger = logging.getLogger(__name__)
@@ -18,11 +14,11 @@ class ExtractionError(ValueError):
     pass
 
 
-class MinerUUnavailableError(RuntimeError):
+class LiteParseUnavailableError(RuntimeError):
     pass
 
 
-class MinerUExtractionError(RuntimeError):
+class LiteParseExtractionError(RuntimeError):
     pass
 
 
@@ -33,16 +29,11 @@ class ExtractedMarkdown:
     markdown: str
 
 
-def check_mineru() -> dict:
-    load_runtime_env()
-    command = os.getenv("MINERU_COMMAND", "mineru")
-    resolved = shutil.which(command)
+def check_liteparse() -> dict:
+    available = importlib_util.find_spec("liteparse") is not None
     return {
-        "ok": resolved is not None,
-        "command": command,
-        "resolved": resolved,
-        "method": os.getenv("MINERU_METHOD", "auto"),
-        "backend": os.getenv("MINERU_BACKEND"),
+        "ok": available,
+        "package": "liteparse",
     }
 
 
@@ -65,98 +56,38 @@ async def extract_upload_markdown(file: UploadFile) -> ExtractedMarkdown:
 
     if suffix in {".pdf", ".docx", ".pptx", ".xlsx"}:
         try:
-            markdown = extract_with_mineru(filename, raw)
-        except (MinerUUnavailableError, MinerUExtractionError) as exc:
+            markdown = extract_with_liteparse(filename, raw)
+        except (LiteParseUnavailableError, LiteParseExtractionError) as exc:
             raise ExtractionError(str(exc)) from exc
-        logger.debug("extract markdown complete filename=%s method=mineru chars=%s", filename, len(markdown))
-        return ExtractedMarkdown(filename=filename, method="mineru", markdown=markdown)
+        logger.debug("extract markdown complete filename=%s method=liteparse chars=%s", filename, len(markdown))
+        return ExtractedMarkdown(filename=filename, method="liteparse", markdown=markdown)
 
     raise ExtractionError(f"Unsupported file type for {filename}")
 
 
-def extract_with_mineru(filename: str, raw: bytes) -> str:
-    load_runtime_env()
-    command = os.getenv("MINERU_COMMAND", "mineru")
-    if shutil.which(command) is None:
-        raise MinerUUnavailableError(f"MinerU command is not available: {command}")
-
-    timeout_seconds = int(os.getenv("MINERU_TIMEOUT_SECONDS", "600"))
+def extract_with_liteparse(filename: str, raw: bytes) -> str:
     suffix = Path(filename).suffix.lower() or ".pdf"
 
-    with tempfile.TemporaryDirectory(prefix="evidencepilot-mineru-") as temp_dir:
-        work_dir = Path(temp_dir)
-        input_path = work_dir / f"input{suffix}"
-        output_dir = work_dir / "output"
-        input_path.write_bytes(raw)
-        output_dir.mkdir()
-
-        args = [
-            command,
-            "--path",
-            str(input_path),
-            "--output",
-            str(output_dir),
-            "--method",
-            os.getenv("MINERU_METHOD", "auto"),
-        ]
-        if api_url := os.getenv("MINERU_API_URL"):
-            args.extend(["--api-url", api_url])
-        if backend := os.getenv("MINERU_BACKEND"):
-            args.extend(["--backend", backend])
-
-        logger.debug(
-            "mineru run start filename=%s command=%s method=%s timeout_seconds=%s",
-            filename,
-            command,
-            os.getenv("MINERU_METHOD", "auto"),
-            timeout_seconds,
-        )
-        returncode, stdout, stderr = _run_mineru_process(args, timeout_seconds)
-
-        if returncode != 0:
-            detail = (stderr or stdout).strip()
-            message = f"MinerU extraction failed: {detail}" if detail else "MinerU extraction failed"
-            raise MinerUExtractionError(message)
-
-        logger.debug("mineru run complete filename=%s output_dir=%s", filename, output_dir)
-        return _read_mineru_markdown(output_dir)
-
-
-def _run_mineru_process(args: list[str], timeout_seconds: int) -> tuple[int, str, str]:
-    process = subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        process.kill()
-        process.communicate()
-        raise MinerUExtractionError("MinerU extraction timed out") from exc
+        from liteparse import LiteParse
+    except ImportError as exc:
+        raise LiteParseUnavailableError("LiteParse package is not available") from exc
 
-    returncode = process.returncode
-    return returncode, stdout or "", stderr or ""
+    with tempfile.TemporaryDirectory(prefix="evidencepilot-liteparse-") as temp_dir:
+        input_path = Path(temp_dir) / f"input{suffix}"
+        input_path.write_bytes(raw)
 
+        try:
+            logger.debug("liteparse run start filename=%s", filename)
+            result = LiteParse(output_format="markdown").parse(str(input_path))
+            markdown = getattr(result, "text", None)
+        except Exception as exc:
+            raise LiteParseExtractionError(f"LiteParse extraction failed: {exc}") from exc
 
-def _read_mineru_markdown(output_dir: Path) -> str:
-    markdown_files = sorted(
-        (path for path in output_dir.rglob("*.md") if path.is_file()),
-        key=lambda path: path.stat().st_size,
-        reverse=True,
-    )
-    for markdown_file in markdown_files:
-        text = markdown_file.read_text(encoding="utf-8", errors="replace")
-        if text.strip():
-            logger.debug(
-                "mineru markdown selected path=%s bytes=%s",
-                markdown_file,
-                markdown_file.stat().st_size,
-            )
-            return _clean_text(text)
-    raise MinerUExtractionError("MinerU did not produce Markdown text")
+    if not isinstance(markdown, str):
+        raise LiteParseExtractionError("LiteParse did not produce Markdown text")
+    logger.debug("liteparse run complete filename=%s chars=%s", filename, len(markdown))
+    return _clean_text(markdown)
 
 
 def _decode_text(raw: bytes) -> str:
