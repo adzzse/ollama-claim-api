@@ -581,3 +581,33 @@ def test_generate_embeddings_client_invalid_response(monkeypatch):
 
     with pytest.raises(OllamaInvalidResponseError):
         asyncio.run(generate_embeddings("test text", Settings()))
+
+
+def test_generate_embeddings_client_rejects_empty_embedding(monkeypatch):
+    import asyncio
+    from app.ollama_client import generate_embeddings
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embedding": []}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ollama_client.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(OllamaInvalidResponseError):
+        asyncio.run(generate_embeddings("test text", Settings()))

@@ -219,7 +219,7 @@ async def generate_embeddings(text: str, settings: Settings) -> list[float]:
             embeddings = response_data.get("embeddings")
             if embeddings and isinstance(embeddings, list):
                 embedding = embeddings[0]
-        if not isinstance(embedding, list):
+        if not isinstance(embedding, list) or not embedding:
             raise ValueError("No embedding vector found in response")
         logger.info("embeddings request complete dimensions=%s", len(embedding))
         return embedding
